@@ -1,6 +1,5 @@
-# FRACTEL
-
-FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements!
+# FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements!
+[![CI](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/ci.yml/badge.svg)](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/ci.yml)
 
 ## Overview
 
