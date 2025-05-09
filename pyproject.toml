@@ -1,0 +1,28 @@
+
+[project]
+name = "fractel"
+version = "0.1.0"
+description = "FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements"
+readme = "README.md"
+authors = [
+    {name = "Alejandro Barrera", email = "alejandro.barrera@duke.edu"},
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=2.0.2",
+    "pandas>=2.2.3",
+    "pytest>=8.3.5",
+    "scipy>=1.13.1",
+    "setuptools",
+    "statsmodels>=0.14.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/Gersbachlab-Bioinformatics/fractel"
+
+[project.scripts]
+fractel = "fractel.fractel:main"
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
