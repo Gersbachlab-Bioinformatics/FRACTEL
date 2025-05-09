@@ -11,10 +11,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import beta
 from statsmodels.stats.multitest import fdrcorrection
-
+from functools import reduce
 
 def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None,
-                 atomic_col='grna', return_guide=False, return_index_min_grna=False):
+                 row_id_col='grna', return_guide=False, return_index_min_grna=False):
     """
     Perform the FRACTEL test on a given dataframe of grouped data.
     """
@@ -32,7 +32,7 @@ def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None,
     pmin = np.min(beta_evals[:bnd])
 
     if return_guide or return_index_min_grna:
-        grnas = dhs_df[atomic_col]
+        grnas = dhs_df[row_id_col]
         if return_index_min_grna:
             return np.argmin(beta_evals)
         grna = grnas.values[np.argmin(beta_evals[:bnd])]
@@ -61,39 +61,54 @@ def run_fractel_analysis(args):
     """
     Run the FRACTEL analysis based on the provided arguments.
     """
-    sim_data = np.load(args.sim_data, allow_pickle = True)['simulations'].item()
-    nb_df = pd.read_csv(
+    
+    # Load the simulated data
+    sim_data = list(map(lambda x: np.load(x, allow_pickle = True)['simulations'].item(), args.sim_data))
+    if len(sim_data) > 1:
+        reduce(lambda x, y: x.update(y), sim_data)
+    sim_data = sim_data[0]
+    
+    # Load the data frame
+    df = pd.read_csv(
         args.data_frame,
         sep='\t',
         usecols=args.usecols
     )
 
-    nb_df = nb_df[~nb_df[args.aggregating_cols[0]].isna()]
+    # Discard rows with NaN values in the aggregating columns
+    df = df[~df[args.aggregating_cols[0]].isna()]
+
+    # If specified, discard rows with certain values in the aggregating columns
     if args.discard_values_in_aggr_cols:
         discard_mask = reduce(
             lambda x, y: x | y,
-            [nb_df[col].isin(args.discard_values_in_aggr_cols) for col in args.aggregating_cols]
+            [df[col].isin(args.discard_values_in_aggr_cols) for col in args.aggregating_cols]
         )
-        nb_df = nb_df[~discard_mask]
+        df = df[~discard_mask]
 
+    # Group the data frame by the specified columns and apply the FRACTEL test
     df_tmp = (
-        nb_df.groupby(args.aggregating_cols)
+        df.groupby(args.aggregating_cols)
+        [df.columns]
         .apply(lambda x: element_test(
             x,
             sim_data,
             pval_col=args.pval_col,
             bnd=args.bnd,
-            atomic_col=args.df_atomic_col,
+            row_id_col=args.row_id_col,
             return_guide=False
         ))
         .to_frame()
     )
-    df_tmp.columns = [args.output_col_basename]
+    df_tmp.columns = [args.output_col_basename]  # rename the column FRACTEL p-values
+
+    # Apply FDR correction to FRACTEL p-values
     _, fdr_pvals_tmp = fdrcorrection(
         df_tmp[args.output_col_basename], alpha=args.fdr_thres, method='indep', is_sorted=False
     )
-
     df_tmp[f'{args.output_col_basename}_fdr_corr'] = fdr_pvals_tmp
+
+    # Save the results to a compressed TSV file
     df_tmp.to_csv(f'{args.output_tsv_basename}.tsv.gz', sep='\t')
     print(f"Results saved to {args.output_tsv_basename}.tsv.gz")
 
@@ -116,25 +131,27 @@ def main():
     run_parser.add_argument('-df', '--data-frame', required=True, type=str,
                              help='File path to the data frame with the data to aggregate')
     run_parser.add_argument('--aggregating-cols', required=True, type=str, nargs="+",
-                             help='List of columns to use for the aggregation.')
+                             help='List of columns in data frame to use for the aggregation.')
     run_parser.add_argument('--usecols', type=str, nargs="+",
                              help='If specified, only these columns will be used from the data frame')
     run_parser.add_argument('--discard-values-in-aggr-cols', type=str, nargs="+",
                              help='If specified, these values will be discarded from the data frame in the aggregating columns')
-    run_parser.add_argument('--sim-data', required=True, type=str,
-                             help='File paths to the simulated data to use for the test (will be concatenated with numpy)')
+    run_parser.add_argument('--sim-data', required=True, type=str, nargs="+",
+                             help='File paths to the numpy dictionary of simulated data to use for the test. ' \
+                             'The key should be the number of guides, and the values should be the p-values of the simulations')
     run_parser.add_argument('--pval-col', default='pvalue', type=str,
-                             help='Column name in the data frame with the p-values to use for the test')
+                             help='Column name in the data frame with the p-values to use for the test (default: %(default)s)')
     run_parser.add_argument('--bnd', type=float,
                              help='Bound for FRACTEL test. If < 1, it is interpreted as a fraction of the number of guides')
     run_parser.add_argument('-o', '--output-tsv-basename', required=True, type=str,
                              help='Path to the output file to save the results (will be saved as a compressed tsv file)')
     run_parser.add_argument('--output-col-basename', type=str, default='FRACTEL_pval',
-                             help='Base name for the output columns')
+                             help='Base name for the output columns (default: %(default)s)')
     run_parser.add_argument('--fdr-thres', type=float, default=0.5,
-                             help='Threshold for FDR correction of FRACTEL p-values')
-    run_parser.add_argument('--df-atomic-col', type=str,
-                             help='If specified, this column will be used to identify the atomic elements in the data frame.')
+                             help='Threshold for FDR correction of FRACTEL p-values (default: %(default)s)')
+    run_parser.add_argument('--row-id-col', type=str,
+                             help='If specified, this column will be used to uniquely identify each element per group in the data frame. ' \
+                             'For example, if aggregating gRNA p-values in genomic elements, this should be the gRNA ID column')
 
     simulate_parser = subparsers.add_parser(
         'simulate',
@@ -149,7 +166,7 @@ def main():
     simulate_parser.add_argument('--bnd', type=float, required=True,
                              help='Bound for FRACTEL test. If < 1, it is interpreted as a fraction of the number of guides')
     simulate_parser.add_argument('--bnd-min', type=int, default = 3,
-                                 help='Minimum bound for the simulation (it could be large)')
+                                 help='Minimum number of singletons for the simulation, in case using a variable/proportional bound (default: %(default)s)')
 
     args = parser.parse_args()
     if args.bnd and args.bnd >= 1:
