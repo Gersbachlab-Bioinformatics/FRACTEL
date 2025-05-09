@@ -10,13 +10,9 @@ FRACTEL is a software designed to find element-level significant discoveies appl
 
 To set up the project locally, follow these steps:
 
-1. Clone the repository:
+1. Install the repository from github:
     ```bash
-    git clone https://github.com/Gersbachlab-Bioinformatics/FRACTEL.git
-    ```
-2. Install dependencies:
-    ```bash
-    pip install FRACTEL
+    pip install git+https://github.com/Gersbachlab-Bioinformatics/FRACTEL
     ```
 
 ## Usage
@@ -58,8 +54,8 @@ We welcome contributions! Please follow these steps:
 
 ## License
 
-This project is licensed under the [insert license name] License. See the `LICENSE` file for details.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Contact
 
-For questions or feedback, please contact [insert contact information].
+For questions or feedback, please contact alejandro.barrera@duke.edu.
