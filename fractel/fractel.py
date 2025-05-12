@@ -47,7 +47,7 @@ def run_simulation(args):
     sim_dict = {}
     for m in [int(m) for m in args.num_guides]:
         if args.bnd < 1:
-            bnd = np.max(int(round(args.bnd*m)),min(m,args.bnd_min))
+            bnd = max(int(round(args.bnd*m)),min(m,args.bnd_min))
         else:
             bnd = min(args.bnd, m)
         pvals = np.sort(np.random.random((args.num_simulations, m)))
