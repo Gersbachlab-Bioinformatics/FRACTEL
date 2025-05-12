@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import beta
 from statsmodels.stats.multitest import fdrcorrection
-from functools import reduce
+
 
 def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None,
                  row_id_col='grna', return_guide=False, return_index_min_grna=False):
@@ -39,6 +39,14 @@ def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None,
         return grna
     return (sim_data[num_guides] < pmin).sum() / sim_data[num_guides].size
 
+def merge_dicts(x, y):
+    """
+    Merge two dictionaries, ignoring if a key is already found.
+    """
+    for key in y:
+        if key not in x:
+            x[key] = y[key]
+    return x    
 
 def run_simulation(args):
     """
@@ -57,6 +65,7 @@ def run_simulation(args):
     np.savez(f'{args.output_basename}', simulations = sim_dict)
     print(f"Simulated dictionary data saved to {args.output_basename}.npz under the key 'simulations'.")
 
+
 def run_fractel_analysis(args):
     """
     Run the FRACTEL analysis based on the provided arguments.
@@ -65,7 +74,7 @@ def run_fractel_analysis(args):
     # Load the simulated data
     sim_data = list(map(lambda x: np.load(x, allow_pickle = True)['simulations'].item(), args.sim_data))
     if len(sim_data) > 1:
-        reduce(lambda x, y: x.update(y), sim_data)
+        reduce(merge_dicts, sim_data)
     sim_data = sim_data[0]
     
     # Load the data frame
