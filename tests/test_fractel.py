@@ -1,37 +1,266 @@
-import pytest
+from unittest.mock import MagicMock
+
 import numpy as np
 import pandas as pd
-from fractel.fractel import element_test
+import pytest
+
+from fractel.fractel import element_test, run_fractel_analysis, run_simulation
+
 
 @pytest.fixture
 def test_data():
+    np.random.seed(113)
     dhs_df = pd.DataFrame({
-        'grna': ['g1', 'g2', 'g3', 'g4'],
-        'pvalue': [0.01, 0.05, 0.02, 0.03]
+        'grna': [f'g{i}' for i in range(1, 21)],
+        'dhs': [f'dhs{1 if i<11 else 2 }' for i in range(1, 21)],
+        'pvalue': np.random.random(20)
     })
     sim_data = {
-        4: np.array([0.01, 0.02, 0.03, 0.04, 0.05])
+        10: np.random.random(10)
     }
     return dhs_df, sim_data
 
-def test_element_test_basic(test_data):
+def test_element_test_with_different_bnd_values(test_data):
     dhs_df, sim_data = test_data
-    result = element_test(dhs_df, sim_data, pval_col='pvalue', bnd=0.5)
+    for gg in dhs_df.groupby('dhs'):
+        for bnd in [0.1, 0.25, 0.5, 0.75, 1]:
+            result = element_test(gg[1], sim_data, pval_col='pvalue', bnd=bnd)
+            assert isinstance(result, float)
+            assert 0 <= result <= 1
+
+def test_element_test_with_custom_pval_col():
+    dhs_df = pd.DataFrame({
+        'grna': [f'g{i}' for i in range(1, 11)],
+        'custom_pval': np.random.random(10)
+    })
+    sim_data = {10: np.random.random(10)}
+    result = element_test(dhs_df, sim_data, pval_col='custom_pval', bnd=0.5)
     assert isinstance(result, float)
     assert 0 <= result <= 1
 
+def test_element_test_with_empty_dataframe():
+    dhs_df = pd.DataFrame(columns=['grna', 'pvalue'])
+    sim_data = {10: np.random.random(10)}
+    with pytest.raises(ValueError):
+        element_test(dhs_df, sim_data, pval_col='pvalue', bnd=0.5)
+
+def test_element_test_with_missing_pval_column():
+    dhs_df = pd.DataFrame({
+        'grna': [f'g{i}' for i in range(1, 11)],
+        'other_col': np.random.random(10)
+    })
+    sim_data = {10: np.random.random(10)}
+    with pytest.raises(KeyError):
+        element_test(dhs_df, sim_data, pval_col='pvalue', bnd=0.5)
+
+def test_element_test_with_large_bnd_value(test_data):
+    dhs_df, sim_data = test_data
+    for gg in dhs_df.groupby('dhs'):
+        result = element_test(gg[1], sim_data, pval_col='pvalue', bnd=6)
+        assert isinstance(result, float)
+        assert 0 <= result <= 1
+
+def test_element_test_with_small_bnd_min():
+    dhs_df = pd.DataFrame({
+        'grna': [f'g{i}' for i in range(1, 11)],
+        'pvalue': np.random.random(10)
+    })
+    sim_data = {10: np.random.random(10)}
+    result = element_test(dhs_df, sim_data, pval_col='pvalue', bnd=0.5, bnd_min=1)
+    assert isinstance(result, float)
+    assert 0 <= result <= 1
+
+def test_element_test_basic(test_data):
+    dhs_df, sim_data = test_data
+    for gg in dhs_df.groupby('dhs'):
+        result = element_test(gg[1], sim_data, pval_col='pvalue', bnd=0.5)
+        assert isinstance(result, float)
+        assert 0 <= result <= 1
+
 def test_element_test_return_guide(test_data):
     dhs_df, sim_data = test_data
-    result = element_test(dhs_df, sim_data, pval_col='pvalue', bnd=0.5, return_guide=True)
-    assert result in dhs_df['grna'].values
+    for gg in dhs_df.groupby('dhs'):
+        result = element_test(gg[1], sim_data, pval_col='pvalue', bnd=0.5, return_guide=True)
+        assert result in dhs_df['grna'].values
 
 def test_element_test_return_index_min_grna(test_data):
     dhs_df, sim_data = test_data
-    result = element_test(dhs_df, sim_data, pval_col='pvalue', bnd=0.5, return_index_min_grna=True)
-    assert isinstance(result, np.int64)
-    assert 0 <= result < len(dhs_df)
+    for gg in dhs_df.groupby('dhs'):
+        result = element_test(gg[1], sim_data, pval_col='pvalue', bnd=0.5, return_index_min_grna=True)
+        assert isinstance(result, np.int64)
+        assert 0 <= result < len(dhs_df)
 
 def test_element_test_invalid_num_guides(test_data):
     dhs_df, sim_data = test_data
     with pytest.raises(ValueError):
         element_test(dhs_df.iloc[:2], sim_data, pval_col='pvalue', bnd=0.5)
+
+@pytest.fixture
+def mock_args():
+    args = MagicMock()
+    args.data_frame = "test_data.tsv"
+    args.aggregating_cols = ["dhs"]
+    args.usecols = ["grna", "dhs", "pvalue"]
+    args.discard_values_in_aggr_cols = None
+    args.sim_data = ["tests/test_data/simulated_data.npz"]#["sim_data.npz"]
+    args.pval_col = "pvalue"
+    args.bnd = 0.5
+    args.bnd_min = 3
+    args.output_col_basename = "FRACTEL_pval"
+    args.fdr_thres = 0.05
+    args.row_id_col = "grna"
+    return args
+
+@pytest.fixture
+def mock_data():
+    df = pd.DataFrame({
+        "grna": [f"g{i}" for i in range(1, 21)],
+        "dhs": [f"dhs{1 if i < 11 else 2}" for i in range(1, 21)],
+        "pvalue": np.random.random(20)
+    })
+
+    sim_data = {
+        10: np.random.random(10)
+    }
+    return df, sim_data
+
+def test_run_fractel_analysis(mock_args, mock_data, monkeypatch):
+    df, sim_data = mock_data
+
+    # Mock file reading
+    monkeypatch.setattr(pd, "read_csv", lambda *args, **kwargs: df)
+
+    result_df = run_fractel_analysis(mock_args)
+
+    assert isinstance(result_df, pd.DataFrame)
+    assert mock_args.output_col_basename in result_df.columns
+    assert f"{mock_args.output_col_basename}_fdr_corr" in result_df.columns
+    assert not result_df.empty
+
+def test_run_fractel_analysis_with_discard_values(mock_args, mock_data, monkeypatch):
+    df, sim_data = mock_data
+    mock_args.discard_values_in_aggr_cols = ["dhs1"]
+
+    # Mock file reading
+    monkeypatch.setattr(pd, "read_csv", lambda *args, **kwargs: df)
+    # monkeypatch.setattr(np, "load", lambda *args, **kwargs: {"simulations": sim_data})
+
+    result_df = run_fractel_analysis(mock_args)
+
+    assert isinstance(result_df, pd.DataFrame)
+    assert mock_args.output_col_basename in result_df.columns
+    assert f"{mock_args.output_col_basename}_fdr_corr" in result_df.columns
+    assert not result_df.empty
+    assert "dhs1" not in result_df.index
+
+def test_run_fractel_analysis_with_nan_values(mock_args, monkeypatch):
+    df = pd.DataFrame({
+        "grna": [f"g{i}" for i in range(1, 21)],
+        "dhs": [f"dhs{1 if i < 11 else 2}" for i in range(1, 21)],
+        "pvalue": [np.nan if i % 5 == 0 else np.random.random() for i in range(1, 21)]
+    })
+    sim_data = {
+        10: np.random.random(10)
+    }
+
+    # Mock file reading
+    monkeypatch.setattr(pd, "read_csv", lambda *args, **kwargs: df)
+    # monkeypatch.setattr(np, "load", lambda *args, **kwargs: {"simulations": sim_data})
+
+    result_df = run_fractel_analysis(mock_args)
+
+    assert isinstance(result_df, pd.DataFrame)
+    assert mock_args.output_col_basename in result_df.columns
+    assert f"{mock_args.output_col_basename}_fdr_corr" in result_df.columns
+
+
+    
+def test_run_simulation_with_valid_args():
+    args = MagicMock()
+    args.num_guides = [10, 20]
+    args.num_simulations = 100
+    args.bnd = 0.5
+    args.bnd_min = 3
+
+    sim_dict = run_simulation(args)
+
+    assert isinstance(sim_dict, dict)
+    assert len(sim_dict) == len(args.num_guides)
+    for num_guides, simulations in sim_dict.items():
+        assert num_guides in args.num_guides
+        assert isinstance(simulations, np.ndarray)
+        assert simulations.shape == (args.num_simulations,)
+
+def test_run_simulation_with_fractional_bnd():
+    args = MagicMock()
+    args.num_guides = [10]
+    args.num_simulations = 50
+    args.bnd = 0.3  # Fractional bound
+    args.bnd_min = 2
+
+    sim_dict = run_simulation(args)
+
+    assert isinstance(sim_dict, dict)
+    assert len(sim_dict) == len(args.num_guides)
+    for num_guides, simulations in sim_dict.items():
+        assert num_guides in args.num_guides
+        assert isinstance(simulations, np.ndarray)
+        assert simulations.shape == (args.num_simulations,)
+
+def test_run_simulation_with_large_bnd():
+    args = MagicMock()
+    args.num_guides = [10]
+    args.num_simulations = 50
+    args.bnd = 15  # Larger than the number of guides
+    args.bnd_min = 3
+
+    sim_dict = run_simulation(args)
+
+    assert isinstance(sim_dict, dict)
+    assert len(sim_dict) == len(args.num_guides)
+    for num_guides, simulations in sim_dict.items():
+        assert num_guides in args.num_guides
+        assert isinstance(simulations, np.ndarray)
+        assert simulations.shape == (args.num_simulations,)
+
+def test_run_simulation_with_small_bnd_min():
+    args = MagicMock()
+    args.num_guides = [10]
+    args.num_simulations = 50
+    args.bnd = 0.5
+    args.bnd_min = 1  # Small minimum bound
+
+    sim_dict = run_simulation(args)
+
+    assert isinstance(sim_dict, dict)
+    assert len(sim_dict) == len(args.num_guides)
+    for num_guides, simulations in sim_dict.items():
+        assert num_guides in args.num_guides
+        assert isinstance(simulations, np.ndarray)
+        assert simulations.shape == (args.num_simulations,)
+
+def test_run_simulation_with_invalid_num_guides():
+    args = MagicMock()
+    args.num_guides = []
+    args.num_simulations = 50
+    args.bnd = 0.5
+    args.bnd_min = 3
+
+    with pytest.raises(ValueError):
+        run_simulation(args)
+
+def test_run_simulation_with_zero_simulations():
+    args = MagicMock()
+    args.num_guides = [10]
+    args.num_simulations = 0  # No simulations
+    args.bnd = 0.5
+    args.bnd_min = 3
+
+    sim_dict = run_simulation(args)
+
+    assert isinstance(sim_dict, dict)
+    assert len(sim_dict) == len(args.num_guides)
+    for num_guides, simulations in sim_dict.items():
+        assert num_guides in args.num_guides
+        assert isinstance(simulations, np.ndarray)
+        assert simulations.size == 0
