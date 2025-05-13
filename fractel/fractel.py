@@ -13,7 +13,7 @@ from scipy.stats import beta
 from statsmodels.stats.multitest import fdrcorrection
 
 
-def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None,
+def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None, bnd_min=3,
                  row_id_col='grna', return_guide=False, return_index_min_grna=False):
     """
     Perform the FRACTEL test on a given dataframe of grouped data.
@@ -28,7 +28,9 @@ def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None,
     aux = np.arange(1, num_guides + 1)
     beta_evals = beta.cdf(pvals, aux, num_guides - aux + 1)
     if bnd < 1:
-        bnd = max(1, int(np.round(num_guides * bnd)))
+        bnd = max(int(round(bnd*num_guides)),min(num_guides, bnd_min))
+    else:
+        bnd = min(bnd, num_guides)
     pmin = np.min(beta_evals[:bnd])
 
     if return_guide or return_index_min_grna:
@@ -52,6 +54,9 @@ def run_simulation(args):
     """
     Simulate data for FRACTEL analysis.
     """
+    if len(args.num_guides) == 0:
+        raise ValueError("Please provide a list of integers for the number of guides to simulate.")
+    
     sim_dict = {}
     for m in [int(m) for m in args.num_guides]:
         if args.bnd < 1:
@@ -62,8 +67,14 @@ def run_simulation(args):
         aux = np.arange(1, m + 1)
         beta_evals = beta.cdf(pvals, aux, m - aux + 1)
         sim_dict[m] = np.min(beta_evals[:,:bnd], axis=1)
-    np.savez(f'{args.output_basename}', simulations = sim_dict)
-    print(f"Simulated dictionary data saved to {args.output_basename}.npz under the key 'simulations'.")
+    return sim_dict
+
+def save_simulation_data(sim_dict, output_basename):
+    """
+    Save the simulated dictionary data to a file.
+    """
+    np.savez(f'{output_basename}', simulations=sim_dict)
+    print(f"Simulated dictionary data saved to {output_basename}.npz under the key 'simulations'.")
 
 
 def run_fractel_analysis(args):
@@ -104,6 +115,7 @@ def run_fractel_analysis(args):
             sim_data,
             pval_col=args.pval_col,
             bnd=args.bnd,
+            bnd_min=args.bnd_min,
             row_id_col=args.row_id_col,
             return_guide=False
         ))
@@ -117,9 +129,15 @@ def run_fractel_analysis(args):
     )
     df_tmp[f'{args.output_col_basename}_fdr_corr'] = fdr_pvals_tmp
 
-    # Save the results to a compressed TSV file
-    df_tmp.to_csv(f'{args.output_tsv_basename}.tsv.gz', sep='\t')
-    print(f"Results saved to {args.output_tsv_basename}.tsv.gz")
+    # Return the resulting data frame
+    return df_tmp
+
+def save_results_to_tsv(df, output_tsv_basename):
+    """
+    Save the results data frame to a compressed TSV file.
+    """
+    df.to_csv(f'{output_tsv_basename}.tsv.gz', sep='\t')
+    print(f"Results saved to {output_tsv_basename}.tsv.gz")
 
 
 def main():
@@ -152,6 +170,8 @@ def main():
                              help='Column name in the data frame with the p-values to use for the test (default: %(default)s)')
     run_parser.add_argument('--bnd', type=float,
                              help='Bound for FRACTEL test. If < 1, it is interpreted as a fraction of the number of guides')
+    run_parser.add_argument('--bnd-min', type=int, default = 3,
+                                 help='Minimum number of singletons for the simulation, in case using a variable/proportional bound (default: %(default)s)')
     run_parser.add_argument('-o', '--output-tsv-basename', required=True, type=str,
                              help='Path to the output file to save the results (will be saved as a compressed tsv file)')
     run_parser.add_argument('--output-col-basename', type=str, default='FRACTEL_pval',
@@ -181,10 +201,13 @@ def main():
     if args.bnd and args.bnd >= 1:
         args.bnd = int(args.bnd)
 
-    if args.command == 'run':
-        run_fractel_analysis(args)
-    elif args.command == 'simulate':
-        run_simulation(args)
+    match args.command:
+        case 'run':
+            df = run_fractel_analysis(args)
+            save_results_to_tsv(df, args.output_tsv_basename)
+        case 'simulate':
+            sim_dict = run_simulation(args)
+            save_simulation_data(sim_dict, args.output_basename)
 
 
 if __name__ == "__main__":
