@@ -23,21 +23,20 @@ def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None, bnd_min=3,
     if num_guides not in sim_data:
         raise ValueError(f"Number of guides {num_guides} not found in simulated data.\
                           Please run the simulation with this number of guides.")
-    aux = dhs_df.sort_values(by=pval_col)
-    pvals = aux[pval_col]
-    aux = np.arange(1, num_guides + 1)
-    beta_evals = beta.cdf(pvals, aux, num_guides - aux + 1)
     if bnd < 1:
         bnd = max(int(round(bnd*num_guides)),min(num_guides, bnd_min))
     else:
         bnd = min(bnd, num_guides)
-    pmin = np.min(beta_evals[:bnd])
+    pvals = dhs_df.sort_values(by=pval_col).head(bnd).loc[:,pval_col]
+    aux = np.arange(1, num_guides + 1)[:bnd]
+    beta_evals = beta.cdf(pvals, aux, (num_guides - aux + 1))
+    pmin = np.min(beta_evals)
 
     if return_guide or return_index_min_grna:
         grnas = dhs_df[row_id_col]
         if return_index_min_grna:
             return np.argmin(beta_evals)
-        grna = grnas.values[np.argmin(beta_evals[:bnd])]
+        grna = grnas.values[np.argmin(beta_evals)]
         return grna
     return (sim_data[num_guides] < pmin).sum() / sim_data[num_guides].size
 
