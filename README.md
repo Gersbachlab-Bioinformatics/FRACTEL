@@ -24,9 +24,11 @@ usage: fractel.py [-h] {run,simulate} ...
 Run FRACTEL test or simulate data
 
 positional arguments:
-  {run,simulate}  Sub-command to execute
-    run           Run FRACTEL test on a given dataframe with p-values of grouped elements
-    simulate      Simulate data for FRACTEL analysis
+  {run,simulate,interpolate}
+                        Sub-command to execute
+    run                 Run FRACTEL test on a given dataframe with p-values of grouped elements
+    simulate            Simulate data for FRACTEL analysis
+    interpolate         Interpolate p-values in a data frame based on a reference data frame
 
 options:
   -h, --help      show this help message and exit
