@@ -55,6 +55,7 @@ coverage/
 **/__pycache__
 
 # Test outputs
+tests/test_data/*.txt.gz
 tests/test_data/*.tsv.gz
 !tests/test_data/test.df.txt.gz
 !tests/test_data/test_output.tsv.gz
