@@ -1,4 +1,4 @@
-# FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements!
+# FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements
 [![CI](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/ci.yml/badge.svg)](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/ci.yml)
 
 ## Overview
@@ -16,12 +16,12 @@ To set up the project locally, follow these steps:
 
 ## Usage
 
-Run the following command to start the application:
+Run the following command to learn more about the available options:
 ```bash
-fractel run --help
-usage: fractel.py [-h] {run,simulate} ...
+$ fractel --help
+usage: fractel.py [-h] {run,simulate,interpolate} ...
 
-Run FRACTEL test or simulate data
+FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements
 
 positional arguments:
   {run,simulate,interpolate}

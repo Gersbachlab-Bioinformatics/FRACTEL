@@ -200,7 +200,7 @@ def main():
     Main function to parse arguments and execute the appropriate sub-command.
     """
     parser = argparse.ArgumentParser(
-        description='Run FRACTEL test or simulate data',
+        description='FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
