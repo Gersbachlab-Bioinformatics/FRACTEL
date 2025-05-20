@@ -12,6 +12,34 @@ import pandas as pd
 from scipy.stats import beta
 from statsmodels.stats.multitest import fdrcorrection
 
+def interpolate_pvalues(df, reference_df, pval_col='pvalue', 
+                        interpolated_col='interpolated_pvalue'):
+    """
+    Interpolate the p-values in a dataframe based on the distribution of p-values in a reference dataframe.
+
+    Parameters:
+    - df: DataFrame containing the p-values to interpolate.
+    - reference_df: DataFrame containing the reference distribution of p-values.
+    - pval_col: Column name in `df` containing the p-values to interpolate.
+    - interpolated_col: Column name to store the interpolated p-values in `df`.
+
+    Returns:
+    - DataFrame with an additional column containing the interpolated p-values.
+    """
+    # Sort the reference p-values
+    reference_pvals = np.sort(reference_df[pval_col].values)
+
+    # Check if reference_pvals is empty
+    if reference_pvals.size == 0:
+        raise ValueError("Reference p-values array is empty. Please provide a non-empty reference dataframe.")
+
+    # Interpolate the p-values in `df` based on the reference distribution
+    df[interpolated_col] = np.interp(
+        df[pval_col],
+        reference_pvals,
+        np.linspace(0, 1, len(reference_pvals))
+    )
+    return df
 
 def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None, bnd_min=3,
                  row_id_col='grna', return_guide=False, return_index_min_grna=False):
@@ -91,7 +119,7 @@ def run_fractel_analysis(args):
     df = pd.read_csv(
         args.data_frame,
         sep='\t',
-        usecols=args.usecols
+        usecols=args.usecols if args.usecols is not None else None
     )
 
     # Discard rows with NaN values in the aggregating columns
@@ -131,14 +159,42 @@ def run_fractel_analysis(args):
     # Return the resulting data frame
     return df_tmp
 
-def save_results_to_tsv(df, output_tsv_basename):
+def save_df_to_tsv(df, output_basename, keep_index=False):
     """
     Save the results data frame to a compressed TSV file.
     """
-    df.to_csv(f'{output_tsv_basename}.tsv.gz', sep='\t')
-    print(f"Results saved to {output_tsv_basename}.tsv.gz")
+    df.to_csv(f'{output_basename}.tsv.gz', sep='\t', index = keep_index, compression='gzip')
+    print(f"Results saved to {output_basename}.tsv.gz")
 
+def run_interpolate(args):
+    """
+    Interpolate p-values in a data frame based on a reference data frame and save the result.
+    """
+    df = pd.read_csv(args.data_frame, sep='\t')
+    reference_df = pd.read_csv(args.reference_data_frame, sep='\t')
+    if args.reference_df_select_col and args.reference_df_select_value:
+        reference_df = reference_df[reference_df[args.reference_df_select_col] == args.reference_df_select_value]
+        assert len(reference_df) > 0, "No rows found in the reference dataframe with the specified selection criteria."
+    df = interpolate_pvalues(
+        df,
+        reference_df,
+        pval_col=args.pval_col,
+        interpolated_col=args.interpolated_col
+    )
+    return df
 
+def validate_args(args):
+    """
+    Validate the command line arguments.
+    """
+    col = getattr(args, 'reference_df_select_col', None)
+    val = getattr(args, 'reference_df_select_value', None)
+    if (col is None and val is not None) or (col is not None and val is None):
+        raise ValueError("--reference-df-select-col and --reference-df-select-value must be used together")
+    if hasattr(args, 'bnd') and args.bnd is not None and args.bnd >= 1:
+        args.bnd = int(args.bnd)
+    return args
+    
 def main():
     """
     Main function to parse arguments and execute the appropriate sub-command.
@@ -170,8 +226,8 @@ def main():
     run_parser.add_argument('--bnd', type=float,
                              help='Bound for FRACTEL test. If < 1, it is interpreted as a fraction of the number of guides')
     run_parser.add_argument('--bnd-min', type=int, default = 3,
-                                 help='Minimum number of singletons for the simulation, in case using a variable/proportional bound (default: %(default)s)')
-    run_parser.add_argument('-o', '--output-tsv-basename', required=True, type=str,
+                            help='Minimum number of singletons for the simulation, in case using a variable/proportional bound (default: %(default)s)')
+    run_parser.add_argument('-o', '--output-basename', required=True, type=str,
                              help='Path to the output file to save the results (will be saved as a compressed tsv file)')
     run_parser.add_argument('--output-col-basename', type=str, default='FRACTEL_pval',
                              help='Base name for the output columns (default: %(default)s)')
@@ -192,21 +248,44 @@ def main():
     simulate_parser.add_argument('--output-basename', required=True, type=str,
                                  help='Base name for the output files')
     simulate_parser.add_argument('--bnd', type=float, required=True,
-                             help='Bound for FRACTEL test. If < 1, it is interpreted as a fraction of the number of guides')
+                                 help='Bound for FRACTEL test. If < 1, it is interpreted as a fraction of the number of guides')
     simulate_parser.add_argument('--bnd-min', type=int, default = 3,
                                  help='Minimum number of singletons for the simulation, in case using a variable/proportional bound (default: %(default)s)')
 
+    interpolate_parser = subparsers.add_parser(
+        'interpolate',
+        help='Interpolate p-values in a data frame based on a reference data frame'
+    )
+    interpolate_parser.add_argument('--data-frame', required=True, type=str,
+                                    help='File path to the data frame with p-values to interpolate')
+    interpolate_parser.add_argument('--pval-col', default='pvalue', type=str,
+                                    help='Column name in the data frames with the p-values to interpolate (default: %(default)s)')
+    interpolate_parser.add_argument('--interpolated-col', default='interpolated_pvalue', type=str,
+                                    help='Column name for the interpolated p-values (default: %(default)s)')
+    interpolate_parser.add_argument('--output-basename', required=True, type=str,
+                                    help='Base name for the output file to save the results (will be saved as a compressed tsv file)')
+    # Group the reference dataframe selection arguments
+    reference_df_select_group = interpolate_parser.add_argument_group('reference dataframe')
+    reference_df_select_group.add_argument('--reference-data-frame', required=True, type=str,
+                                           help='File path to the reference data frame with p-values')
+    reference_df_select_group.add_argument('--reference-df-select-col', type=str,
+                                           help='Column to use for filtering the reference dataframe')
+    reference_df_select_group.add_argument('--reference-df-select-value', type=str,
+                                           help='Value to use for filtering the reference dataframe')
+
     args = parser.parse_args()
-    if args.bnd and args.bnd >= 1:
-        args.bnd = int(args.bnd)
+    args = validate_args(args)
 
     match args.command:
         case 'run':
             df = run_fractel_analysis(args)
-            save_results_to_tsv(df, args.output_tsv_basename)
+            save_df_to_tsv(df, args.output_basename, keep_index=True)
         case 'simulate':
             sim_dict = run_simulation(args)
             save_simulation_data(sim_dict, args.output_basename)
+        case 'interpolate':
+            df = run_interpolate(args)
+            save_df_to_tsv(df, args.output_basename)
 
 
 if __name__ == "__main__":
