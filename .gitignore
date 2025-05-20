@@ -1,0 +1,61 @@
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Environment variables
+.env
+.env.*
+
+# Build outputs
+dist/
+build/
+out/
+**.egg-info/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git files
+.git/
+#.gitignore
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+*.patch
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Miscellaneous
+*.lock
+*.cache
+*.pid
+*.seed
+*.pid.lock
+
+# Cache files and directories
+**/__pycache__
+
+# Test outputs
+tests/test_data/*.txt.gz
+tests/test_data/*.tsv.gz
+!tests/test_data/test.df.txt.gz
+!tests/test_data/test_output.tsv.gz
