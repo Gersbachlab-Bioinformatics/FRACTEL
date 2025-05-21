@@ -4,8 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fractel.fractel import element_test, run_fractel_analysis
-
+from fractel.fractel import element_test, run_fractel_analysis, compute_effect_sizes
 
 @pytest.fixture
 def test_data():
@@ -13,7 +12,8 @@ def test_data():
     dhs_df = pd.DataFrame({
         'grna': [f'g{i}' for i in range(1, 21)],
         'dhs': [f'dhs{1 if i<11 else 2 }' for i in range(1, 21)],
-        'pvalue': np.random.random(20)
+        'pvalue': np.random.random(20),
+        "effect_size": [0.5 - i for i in np.random.random(20)]
     })
     sim_data = {
         10: np.random.random(10)
@@ -106,7 +106,7 @@ def mock_args():
     args.pval_col = "pvalue"
     args.bnd = 0.5
     args.bnd_min = 3
-    args.output_col_basename = "FRACTEL_pval"
+    args.output_col_basename = "FRACTEL"
     args.fdr_thres = 0.05
     args.row_id_col = "grna"
     return args
@@ -133,8 +133,8 @@ def test_run_fractel_analysis(mock_args, mock_data, monkeypatch):
     result_df = run_fractel_analysis(mock_args)
 
     assert isinstance(result_df, pd.DataFrame)
-    assert mock_args.output_col_basename in result_df.columns
-    assert f"{mock_args.output_col_basename}_fdr_corr" in result_df.columns
+    assert f"{mock_args.output_col_basename}_pval" in result_df.columns
+    assert f"{mock_args.output_col_basename}_pval_fdr_corr" in result_df.columns
     assert not result_df.empty
 
 def test_run_fractel_analysis_with_discard_values(mock_args, mock_data, monkeypatch):
@@ -148,8 +148,8 @@ def test_run_fractel_analysis_with_discard_values(mock_args, mock_data, monkeypa
     result_df = run_fractel_analysis(mock_args)
 
     assert isinstance(result_df, pd.DataFrame)
-    assert mock_args.output_col_basename in result_df.columns
-    assert f"{mock_args.output_col_basename}_fdr_corr" in result_df.columns
+    assert f"{mock_args.output_col_basename}_pval" in result_df.columns
+    assert f"{mock_args.output_col_basename}_pval_fdr_corr" in result_df.columns
     assert not result_df.empty
     assert "dhs1" not in result_df.index
 
@@ -170,7 +170,57 @@ def test_run_fractel_analysis_with_nan_values(mock_args, monkeypatch):
     result_df = run_fractel_analysis(mock_args)
 
     assert isinstance(result_df, pd.DataFrame)
-    assert mock_args.output_col_basename in result_df.columns
-    assert f"{mock_args.output_col_basename}_fdr_corr" in result_df.columns
+    assert f"{mock_args.output_col_basename}_pval"  in result_df.columns
+    assert f"{mock_args.output_col_basename}_pval_fdr_corr" in result_df.columns
 
+def test_compute_effect_sizes_basic():
+    df = pd.DataFrame({
+        "grna": [f"g{i}" for i in range(1, 11)],
+        "dhs": ["dhs1"] * 5 + ["dhs2"] * 5,
+        "pvalue": np.random.random(10),
+        "Estimate": 0.5 - np.random.random(10)
+    })
+    result = compute_effect_sizes(df, aggregating_cols="dhs", pval_col="pvalue")
+    assert isinstance(result, pd.DataFrame)
+    assert "FRACTEL_effect_size" in result.columns
+    assert set(result.index) == {"dhs1", "dhs2"}
+    assert result["FRACTEL_effect_size"].notnull().all()
+
+def test_compute_effect_sizes_with_nan_values():
+    df = pd.DataFrame({
+        "grna": [f"g{i}" for i in range(1, 11)],
+        "dhs": ["dhs1"] * 5 + ["dhs2"] * 5,
+        "pvalue": np.random.random(10),
+        "Estimate": [np.nan if i == 3 else 5-i for i in range(10)]
+    })
+    result = compute_effect_sizes(df, aggregating_cols=["dhs"], pval_col="pvalue")
+    assert isinstance(result, pd.DataFrame)
+    assert "FRACTEL_effect_size" in result.columns
+    assert set(result.index) == {"dhs1", "dhs2"}
+
+def test_compute_effect_sizes_empty_dataframe():
+    df = pd.DataFrame(columns=["grna", "dhs", "pvalue", "Estimate"])
+    with pytest.raises(ValueError):
+        compute_effect_sizes(df, aggregating_cols=["dhs"], pval_col="pvalue")
+
+def test_compute_effect_sizes_missing_value_col():
+    df = pd.DataFrame({
+        "grna": [f"g{i}" for i in range(1, 11)],
+        "dhs": ["dhs1"] * 5 + ["dhs2"] * 5,
+        "pvalue": np.random.random(10)
+    })
+    with pytest.raises(KeyError):
+        compute_effect_sizes(df, aggregating_cols=["dhs"], pval_col="value")
+
+def test_compute_effect_sizes_single_group():
+    df = pd.DataFrame({
+        "grna": [f"g{i}" for i in range(1, 6)],
+        "dhs": ["dhs1"] * 5,
+        "pvalue": np.random.random(5),
+        "Estimate": 0.5 - np.random.random(5)
+    })
+    result = compute_effect_sizes(df, aggregating_cols=["dhs"], pval_col="pvalue")
+    assert isinstance(result, pd.DataFrame)
+    assert "FRACTEL_effect_size" in result.columns
+    assert set(result.index) == {"dhs1"}
 
