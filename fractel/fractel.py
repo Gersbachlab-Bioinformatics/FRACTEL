@@ -10,7 +10,12 @@ from functools import reduce
 import numpy as np
 import pandas as pd
 from scipy.stats import beta
+from scipy.stats import norm as snorm
 from statsmodels.stats.multitest import fdrcorrection
+import gc
+
+# Global constants
+PSEUDOCOUNT = 1e-10
 
 def interpolate_pvalues(df, reference_df, pval_col='pvalue', 
                         interpolated_col='interpolated_pvalue'):
@@ -103,23 +108,12 @@ def save_simulation_data(sim_dict, output_basename):
     np.savez(f'{output_basename}', simulations=sim_dict)
     print(f"Simulated dictionary data saved to {output_basename}.npz under the key 'simulations'.")
 
-
-def run_fractel_analysis(args):
-    """
-    Run the FRACTEL analysis based on the provided arguments.
-    """
-    
-    # Load the simulated data
-    sim_data = list(map(lambda x: np.load(x, allow_pickle = True)['simulations'].item(), args.sim_data))
-    if len(sim_data) > 1:
-        reduce(merge_dicts, sim_data)
-    sim_data = sim_data[0]
-    
+def load_and_filter_df(args):
     # Load the data frame
     df = pd.read_csv(
         args.data_frame,
         sep='\t',
-        usecols=args.usecols if args.usecols is not None else None
+        usecols=args.usecols
     )
 
     # Discard rows with NaN values in the aggregating columns
@@ -132,6 +126,22 @@ def run_fractel_analysis(args):
             [df[col].isin(args.discard_values_in_aggr_cols) for col in args.aggregating_cols]
         )
         df = df[~discard_mask]
+    return df
+
+
+def run_fractel_analysis(args):
+    """
+    Run the FRACTEL analysis based on the provided arguments.
+    """
+    
+    # Load the simulated data
+    sim_data = list(map(lambda x: np.load(x, allow_pickle = True)['simulations'].item(), args.sim_data))
+    if len(sim_data) > 1:
+        reduce(merge_dicts, sim_data)
+    sim_data = sim_data[0]
+    
+    # Load and filter the target data frame
+    df = load_and_filter_df(args)
 
     # Group the data frame by the specified columns and apply the FRACTEL test
     df_tmp = (
@@ -148,13 +158,13 @@ def run_fractel_analysis(args):
         ))
         .to_frame()
     )
-    df_tmp.columns = [args.output_col_basename]  # rename the column FRACTEL p-values
+    df_tmp.columns = [f'{args.output_col_basename}_pval']  # rename the column FRACTEL p-values
 
     # Apply FDR correction to FRACTEL p-values
     _, fdr_pvals_tmp = fdrcorrection(
-        df_tmp[args.output_col_basename], alpha=args.fdr_thres, method='indep', is_sorted=False
+        df_tmp[f'{args.output_col_basename}_pval'], alpha=args.fdr_thres, method='indep', is_sorted=False
     )
-    df_tmp[f'{args.output_col_basename}_fdr_corr'] = fdr_pvals_tmp
+    df_tmp[f'{args.output_col_basename}_pval_fdr_corr'] = fdr_pvals_tmp
 
     # Return the resulting data frame
     return df_tmp
@@ -183,6 +193,80 @@ def run_interpolate(args):
     )
     return df
 
+def compute_effect_sizes(df, aggregating_cols, pval_col, effect_size_col="Estimate",
+                          pval_type="two-sided", output_col_basename="FRACTEL"):
+    """
+    Calculate effect size defined as the maximum weighted average across observations in an element.
+    
+    Parameters:
+    - df: DataFrame containing the data
+    - aggregating_cols: List of columns to group by
+    - pval_col: Column name with p-values
+    - effect_size_col: Column name with effect sizes
+    - pval_type: Type of p-value ('left', 'right', or 'two-sided')
+    - output_col_basename: Base name for the output column
+    
+    Returns:
+    - DataFrame with computed effect sizes
+    """
+    
+    # Add left and right p-values
+    if pval_type == 'two-sided':
+        df['pval_left'] = df[pval_col]/2 
+        df.loc[df[effect_size_col]>0, 'pval_left'] = \
+                (1 - df.loc[df[effect_size_col]>0, 'pval_left']).values
+        df['pval_right'] = 1 - df['pval_left']
+    else:
+        df[f'pval_{pval_type}'] = df[pval_col]
+        df[f'pval_{"right" if pval_type == "left" else "left" }_pval'] = 1 - df[f'pval_{pval_type}']
+
+    # Compute TW estimator for left and right p-value
+    df_tmp = df.reset_index().groupby(aggregating_cols)\
+         [df.columns]\
+        .apply(lambda x: ((1-x.pval_left)*x[effect_size_col]).sum()/
+               max((1-x.pval_left).sum(), PSEUDOCOUNT))
+    
+    # Create a new DataFrame to store the results
+    df_tmp = pd.DataFrame(df_tmp)
+    df_tmp.columns = ['tw_estimator_pval_left']
+    df_tmp['tw_estimator_pval_right'] = df.reset_index().groupby(aggregating_cols)\
+        [df.columns]\
+        .apply(lambda x: ((1-x.pval_right)*x[effect_size_col]).sum()/
+               max((1-x.pval_right).sum(), PSEUDOCOUNT))
+    df = None
+    # Import and run garbage collector to free up memory
+    gc.collect()
+
+    # When tw_estimator is NA, assign 1 (this comes when the p-values are straight 1s)
+    df_tmp.loc[df_tmp.tw_estimator_pval_left.isna(),'tw_estimator_pval_left'] = 0
+    df_tmp.loc[df_tmp.tw_estimator_pval_right.isna(),'tw_estimator_pval_right'] = 0
+
+    df_tmp = df_tmp.reset_index()
+
+    # Set TW estimator as the largest effect size between left and right in absolute value
+    # Get the effect size as the maximum absolute value between left and right estimators
+    left_abs = np.abs(df_tmp['tw_estimator_pval_left'])
+    right_abs = np.abs(df_tmp['tw_estimator_pval_right'])
+    
+    # Create mask for where left absolute values are greater than right
+    left_greater_mask = left_abs > right_abs
+    
+    # Initialize with right estimator values
+    df_tmp['tw_estimator'] = df_tmp['tw_estimator_pval_right']
+    
+    # Where left is greater, use left estimator values
+    df_tmp.loc[left_greater_mask, 'tw_estimator'] = df_tmp.loc[left_greater_mask, 'tw_estimator_pval_left']
+    
+    # Drop tw_estimator_pval_left and tw_estimator_pval_right columns
+    df_tmp.drop(columns=['tw_estimator_pval_left', 'tw_estimator_pval_right'], inplace=True)
+    
+    # Rename the column to match the output column basename
+    df_tmp.rename(columns={'tw_estimator': f'{output_col_basename}_effect_size'}, inplace=True)
+    
+    # Last, set the index to the original index of the data frame
+    df_tmp = df_tmp.set_index(aggregating_cols)
+    return df_tmp
+
 def validate_args(args):
     """
     Validate the command line arguments.
@@ -193,6 +277,14 @@ def validate_args(args):
         raise ValueError("--reference-df-select-col and --reference-df-select-value must be used together")
     if hasattr(args, 'bnd') and args.bnd is not None and args.bnd >= 1:
         args.bnd = int(args.bnd)
+    if hasattr(args, 'effect_size_col') and args.effect_size_col is not None:
+        # Try to check if effect_size_col is in the dataframe columns
+        try:
+            df = pd.read_csv(args.data_frame, sep='\t', nrows=1)
+            if args.effect_size_col not in df.columns:
+                raise ValueError(f"Specified effect_size_col '{args.effect_size_col}' not found in the data frame columns.")
+        except Exception as e:
+            raise ValueError(f"Error checking effect_size_col: {e}") from e
     return args
     
 def main():
@@ -223,19 +315,24 @@ def main():
                              'The key should be the number of guides, and the values should be the p-values of the simulations')
     run_parser.add_argument('--pval-col', default='pvalue', type=str,
                              help='Column name in the data frame with the p-values to use for the test (default: %(default)s)')
+    run_parser.add_argument('--pval-type', choices=('left', 'right', 'two-sided'), type=str, default='two-sided',
+                            help='Type of p-value to use: "left" for left-tailed, "right" for right-tailed, or "two-sided" for two-tailed tests (default: %(default)s)')
     run_parser.add_argument('--bnd', type=float,
                              help='Bound for FRACTEL test. If < 1, it is interpreted as a fraction of the number of guides')
     run_parser.add_argument('--bnd-min', type=int, default = 3,
                             help='Minimum number of singletons for the simulation, in case using a variable/proportional bound (default: %(default)s)')
     run_parser.add_argument('-o', '--output-basename', required=True, type=str,
                              help='Path to the output file to save the results (will be saved as a compressed tsv file)')
-    run_parser.add_argument('--output-col-basename', type=str, default='FRACTEL_pval',
-                             help='Base name for the output columns (default: %(default)s)')
+    run_parser.add_argument('--output-col-basename', type=str, default='FRACTEL',
+                             help='Base name for the `*_pval` and `*_pval_fdr_corr` output columns (default: %(default)s)')
     run_parser.add_argument('--fdr-thres', type=float, default=0.5,
                              help='Threshold for FDR correction of FRACTEL p-values (default: %(default)s)')
     run_parser.add_argument('--row-id-col', type=str,
                              help='If specified, this column will be used to uniquely identify each element per group in the data frame. ' \
                              'For example, if aggregating gRNA p-values in genomic elements, this should be the gRNA ID column')
+    run_parser.add_argument('--effect-size-col', type=str,
+                             help='If specified, use the data frame values under this column to compute effect sizes defined as ' \
+                             'a maximum weighted average across observations in an element. ')
 
     simulate_parser = subparsers.add_parser(
         'simulate',
@@ -279,6 +376,16 @@ def main():
     match args.command:
         case 'run':
             df = run_fractel_analysis(args)
+            if args.effect_size_col is not None:
+                # Add fractel_df to the final results
+                df = df.join(compute_effect_sizes(
+                    args.data_frame,
+                    args.aggregating_cols,
+                    args.pval_col,
+                    args.effect_size_col,
+                    args.pval_type,
+                    args.output_col_basename
+                ), on=args.aggregating_cols)
             save_df_to_tsv(df, args.output_basename, keep_index=True)
         case 'simulate':
             sim_dict = run_simulation(args)
