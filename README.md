@@ -1,6 +1,6 @@
 # FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements
 [![CI](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/ci.yml/badge.svg)](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/ci.yml)
-
+[![Docker](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/docker-publish.yml)
 ## Overview
 
 FRACTEL is a software designed to find element-level significant discoveies applying a Robust Rank Aggregation (RRA) method to combine individual p-values.
