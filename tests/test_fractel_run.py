@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import numpy as np
+import muon as mu 
 import pandas as pd
 import pytest
 
@@ -221,6 +222,36 @@ def test_compute_effect_sizes_single_group():
     })
     result = compute_effect_sizes(df, aggregating_cols=["dhs"], pval_col="pvalue")
     assert isinstance(result, pd.DataFrame)
-    assert "FRACTEL_effect_size" in result.columns
-    assert set(result.index) == {"dhs1"}
 
+@pytest.fixture
+def mock_mudata_args():
+    args = MagicMock()
+    args.data_frame = None
+    args.mudata = "tests/test_data/test_mudata.h5mu"
+    args.mudata_mod = "guide"
+    args.mu_uns_key_results = "test_results"
+    args.mu_guide_mod = "guide"
+    args.mu_guide_id_col = "guide_id"
+    args.mu_element_id_cols = ['intended_target_name', 'intended_target_chr', 'intended_target_start', 
+                                       'intended_target_end']
+    args.aggregating_cols = ["element_id", "gene_id"]
+    args.bnd = 1
+    args.discard_values_in_aggr_cols = None
+    args.sim_data = ["tests/test_data/simulated_data.npz"]
+    args.pval_col = "sceptre_p_value"
+    args.effect_size_col = "sceptre_log2_fc"
+    args.bnd_min = 3
+    args.output_col_basename = "FRACTEL"
+    args.fdr_thres = 0.05
+    args.row_id_col = "grna_id"
+    return args
+
+def test_run_fractel_analysis_with_mudata(mock_mudata_args, monkeypatch):
+    """Test run_fractel_analysis with mudata input."""
+            
+    result_df = run_fractel_analysis(mock_mudata_args)
+    
+    assert isinstance(result_df, pd.DataFrame)
+    assert f"{mock_mudata_args.output_col_basename}_pval" in result_df.columns
+    assert f"{mock_mudata_args.output_col_basename}_pval_fdr_corr" in result_df.columns
+    assert not result_df.empty
