@@ -358,7 +358,16 @@ def validate_args(args):
 
     
     return args
-    
+
+def update_mudata(args, df):
+    """
+    Update the MuData object with the FRACTEL results.
+    """
+    mudata = mu.read_h5mu(args.mudata)
+    mudata.uns[f'{args.output_col_basename}_results'] = df.to_dict(orient='list')
+    mudata.write(filename=f'{args.output_basename}_{args.output_col_basename}.h5mu', compression='gzip')
+    print(f"Updated MuData object saved to {args.output_basename}_{args.output_col_basename}.h5mu")
+
 def main():
     """
     Main function to parse arguments and execute the appropriate sub-command.
@@ -398,6 +407,8 @@ def main():
                                        'intended_target_end'], 
                                        help='Columns in the guide metadata data frame that together uniquely ' \
                                        'identify a genomic element (default: %(default)s)')
+    mudata_group.add_argument('--save-updated-mu-data', action='store_true',
+                                help='If specified, update and save the MuData object with the FRACTEL results. ')
     run_parser.add_argument('--aggregating-cols', required=True, type=str, nargs="+",
                              help='List of columns in data frame to use for the aggregation. The first column is ' \
                              'implicitely considered the genomic element ID column (e.g. dhs)')
@@ -482,6 +493,9 @@ def main():
                     args.output_col_basename
                 ), on=args.aggregating_cols)
             save_df_to_tsv(df, args.output_basename, keep_index=True)
+            if args.mudata and args.save_updated_mu_data:
+                update_mudata(args, df)
+                
         case 'simulate':
             sim_dict = run_simulation(args)
             save_simulation_data(sim_dict, args.output_basename)
