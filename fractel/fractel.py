@@ -5,14 +5,14 @@ FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements
 """
 
 import argparse
+import gc
 from functools import reduce
 
+import mudata as mu
 import numpy as np
 import pandas as pd
 from scipy.stats import beta
-from scipy.stats import norm as snorm
 from statsmodels.stats.multitest import fdrcorrection
-import gc
 
 # Global constants
 PSEUDOCOUNT = 1e-10
@@ -109,6 +109,9 @@ def save_simulation_data(sim_dict, output_basename):
     print(f"Simulated dictionary data saved to {output_basename}.npz under the key 'simulations'.")
 
 def load_and_filter_df(args):
+    """
+    Load and filter the data frame based on the provided arguments.
+    """
     # Load the data frame
     df = pd.read_csv(
         args.data_frame,
@@ -128,6 +131,52 @@ def load_and_filter_df(args):
         df = df[~discard_mask]
     return df
 
+def load_and_filter_mudata(args):
+    """
+    Load and filter the MuData object based on the provided arguments.
+    """
+    # Load the MuData object
+    mu_data = mu.read_h5mu(args.mudata)
+    
+    # Create a DataFrame from the MuData object results
+    df = pd.DataFrame(mu_data.uns[args.mu_uns_key_results])
+    # Create a copy of the guide metadata from the MuData object
+    metadata_df = mu_data[args.mu_guide_mod].var.copy()
+
+    # Close mudata, as is no longer needed
+    mu_data = None
+    gc.collect()
+
+    # Create a new column in the data frame with the element IDs
+    metadata_df[args.aggregating_cols[0]] = metadata_df[args.mu_element_id_cols]\
+        .astype(str).agg('_'.join, axis=1)
+
+    # Merge the data frame with the guide metadata in the MuData object
+    df = df.merge(
+        metadata_df.loc[:, [args.mu_guide_id_col, args.aggregating_cols[0]]],
+        on=args.mu_guide_id_col,
+        how='left'
+    )    
+
+    # If specified, discard rows with certain values in the aggregating columns
+    if args.discard_values_in_aggr_cols:
+        discard_mask = reduce(
+            lambda x, y: x | y,
+            [df[col].isin(args.discard_values_in_aggr_cols) for col in args.aggregating_cols]
+        )
+        df = df[~discard_mask]
+
+    # Return the filtered data frame
+    return df
+
+
+def load_and_filter_data(args):
+    """
+    Load and filter the data frame or MuData object based on the provided arguments.
+    """
+    if args.data_frame is not None:
+        return load_and_filter_df(args)
+    return load_and_filter_mudata(args)
 
 def run_fractel_analysis(args):
     """
@@ -140,8 +189,7 @@ def run_fractel_analysis(args):
         reduce(merge_dicts, sim_data)
     sim_data = sim_data[0]
     
-    # Load and filter the target data frame
-    df = load_and_filter_df(args)
+    df = load_and_filter_data(args)
 
     # Group the data frame by the specified columns and apply the FRACTEL test
     df_tmp = (
@@ -277,16 +325,49 @@ def validate_args(args):
         raise ValueError("--reference-df-select-col and --reference-df-select-value must be used together")
     if hasattr(args, 'bnd') and args.bnd is not None and args.bnd >= 1:
         args.bnd = int(args.bnd)
-    if hasattr(args, 'effect_size_col') and args.effect_size_col is not None:
-        # Try to check if effect_size_col is in the dataframe columns
+    if hasattr(args, 'data-frame'):
+        if hasattr(args, 'effect_size_col') and args.effect_size_col is not None:
+            try:
+                # Try to check if effect_size_col is in the dataframe columns            
+                df = pd.read_csv(args.data_frame, sep='\t', nrows=1)
+                if args.effect_size_col not in df.columns:
+                    raise ValueError(f"Specified effect_size_col '{args.effect_size_col}' not found in the data frame columns.")
+            except Exception as e:
+                raise ValueError(f"Error checking effect_size_col: {e}") from e
+    else:
+        # If using MuData, check that the file exists
+        if not hasattr(args, 'mudata'):
+            raise ValueError("Please provide a valid MuData object file path with --mudata")
         try:
-            df = pd.read_csv(args.data_frame, sep='\t', nrows=1)
-            if args.effect_size_col not in df.columns:
-                raise ValueError(f"Specified effect_size_col '{args.effect_size_col}' not found in the data frame columns.")
+            mu_data = mu.read_h5mu(args.mudata)
+            # Check that the Mudata object contains results, layer and guide metadata
+            if args.mu_uns_key_results not in mu_data.uns_keys():
+                raise ValueError(f"MuData object does not contain the specified uns key '{args.mu_uns_key_results}'. Available keys: {mu_data.uns_keys()}")
+            if args.mu_guide_mod not in mu_data.mod:
+                raise ValueError(f"MuData object does not contain the specified guide modality '{args.mu_guide_mod}'. Available modalities: {mu_data.mod}")
+            # Check if the guide ID column exists in the MuData object
+            if args.mu_guide_id_col not in mu_data[args.mu_guide_mod].var_keys():
+                raise ValueError(f"MuData object does not contain the specified guide ID column '{args.mu_guide_id_col}'. Available columns: {mu_data[args.mu_guide_mod].var_names}")
+            # Check if the element ID columns exist in the MuData object
+            for col in args.mu_element_id_cols:
+                if col not in mu_data[args.mu_guide_mod].var_keys():
+                    raise ValueError(f"MuData object does not contain the specified element ID column '{col}'. Available columns: {mu_data[args.mu_guide_mod].var_names}")
         except Exception as e:
-            raise ValueError(f"Error checking effect_size_col: {e}") from e
-    return args
+            raise ValueError(f"Error reading MuData object: {e}") from e
+
+
     
+    return args
+
+def update_mudata(args, df):
+    """
+    Update the MuData object with the FRACTEL results.
+    """
+    mudata = mu.read_h5mu(args.mudata)
+    mudata.uns[f'{args.output_col_basename}_results'] = df.to_dict(orient='list')
+    mudata.write(filename=f'{args.output_basename}_{args.output_col_basename}.h5mu', compression='gzip')
+    print(f"Updated MuData object saved to {args.output_basename}_{args.output_col_basename}.h5mu")
+
 def main():
     """
     Main function to parse arguments and execute the appropriate sub-command.
@@ -302,10 +383,35 @@ def main():
         'run',
         help='Run FRACTEL test on a given dataframe with p-values of grouped elements'
     )
-    run_parser.add_argument('-df', '--data-frame', required=True, type=str,
+
+    
+    # Create a mutually exclusive group for data input options
+    data_input_group = run_parser.add_mutually_exclusive_group(required=True)
+    data_input_group.add_argument('-df', '--data-frame', type=str,
                              help='File path to the data frame with the data to aggregate')
+    data_input_group.add_argument('-mu', '--mudata', type=str,
+                             help='MuData object file path in IGVF format to use instead of a data frame')
+    
+    # Group the reference dataframe selection arguments for MuData
+    mudata_group = run_parser.add_argument_group('mudata specific options')
+    mudata_group.add_argument('--mu-uns-key-results', type=str, default='test_results',
+                              help='Uns key in the MuData object, found in the obj.uns_keys(), to use ' \
+                              'for the results (default: %(default)s)')
+    mudata_group.add_argument('--mu-guide-mod', type=str, default='guide',
+                              help='Name of the modality in MuData object with the guide data layer %(default)s)')
+    mudata_group.add_argument('--mu-guide-id-col', type=str, default='guide_id',
+                              help='Column in the MuData guide metadata (obj[\'guide\'].var) and results ' \
+                              'identifying each gRNA (default: %(default)s)')
+    mudata_group.add_argument('--mu-element-id-cols', type=str, nargs='+', 
+                              default=['intended_target_name', 'intended_target_chr', 'intended_target_start', 
+                                       'intended_target_end'], 
+                                       help='Columns in the guide metadata data frame that together uniquely ' \
+                                       'identify a genomic element (default: %(default)s)')
+    mudata_group.add_argument('--save-updated-mu-data', action='store_true',
+                                help='If specified, update and save the MuData object with the FRACTEL results. ')
     run_parser.add_argument('--aggregating-cols', required=True, type=str, nargs="+",
-                             help='List of columns in data frame to use for the aggregation.')
+                             help='List of columns in data frame to use for the aggregation. The first column is ' \
+                             'implicitely considered the genomic element ID column (e.g. dhs)')
     run_parser.add_argument('--usecols', type=str, nargs="+",
                              help='If specified, only these columns will be used from the data frame')
     run_parser.add_argument('--discard-values-in-aggr-cols', type=str, nargs="+",
@@ -379,7 +485,7 @@ def main():
             if args.effect_size_col is not None:
                 # Add fractel_df to the final results
                 df = df.join(compute_effect_sizes(
-                    args.data_frame,
+                    load_and_filter_data(args),
                     args.aggregating_cols,
                     args.pval_col,
                     args.effect_size_col,
@@ -387,6 +493,9 @@ def main():
                     args.output_col_basename
                 ), on=args.aggregating_cols)
             save_df_to_tsv(df, args.output_basename, keep_index=True)
+            if args.mudata and args.save_updated_mu_data:
+                update_mudata(args, df)
+                
         case 'simulate':
             sim_dict = run_simulation(args)
             save_simulation_data(sim_dict, args.output_basename)

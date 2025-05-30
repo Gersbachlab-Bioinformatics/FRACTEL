@@ -15,6 +15,7 @@ dependencies = [
     "scipy>=1.13.1",
     "setuptools",
     "statsmodels>=0.14.4",
+    "muon>=0.1.6"
 ]
 
 [project.urls]
