@@ -325,7 +325,7 @@ def validate_args(args):
         raise ValueError("--reference-df-select-col and --reference-df-select-value must be used together")
     if hasattr(args, 'bnd') and args.bnd is not None and args.bnd >= 1:
         args.bnd = int(args.bnd)
-    if hasattr(args, 'data-frame'):
+    if hasattr(args, 'data_frame'):
         if hasattr(args, 'effect_size_col') and args.effect_size_col is not None:
             try:
                 # Try to check if effect_size_col is in the dataframe columns            
@@ -354,9 +354,6 @@ def validate_args(args):
                     raise ValueError(f"MuData object does not contain the specified element ID column '{col}'. Available columns: {mu_data[args.mu_guide_mod].var_names}")
         except Exception as e:
             raise ValueError(f"Error reading MuData object: {e}") from e
-
-
-    
     return args
 
 def update_mudata(args, df):
