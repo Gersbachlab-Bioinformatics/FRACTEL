@@ -336,24 +336,25 @@ def validate_args(args):
                 raise ValueError(f"Error checking effect_size_col: {e}") from e
     else:
         # If using MuData, check that the file exists
-        if not hasattr(args, 'mudata'):
-            raise ValueError("Please provide a valid MuData object file path with --mudata")
-        try:
-            mu_data = mu.read_h5mu(args.mudata)
-            # Check that the Mudata object contains results, layer and guide metadata
-            if args.mu_uns_key_results not in mu_data.uns_keys():
-                raise ValueError(f"MuData object does not contain the specified uns key '{args.mu_uns_key_results}'. Available keys: {mu_data.uns_keys()}")
-            if args.mu_guide_mod not in mu_data.mod:
-                raise ValueError(f"MuData object does not contain the specified guide modality '{args.mu_guide_mod}'. Available modalities: {mu_data.mod}")
-            # Check if the guide ID column exists in the MuData object
-            if args.mu_guide_id_col not in mu_data[args.mu_guide_mod].var_keys():
-                raise ValueError(f"MuData object does not contain the specified guide ID column '{args.mu_guide_id_col}'. Available columns: {mu_data[args.mu_guide_mod].var_names}")
-            # Check if the element ID columns exist in the MuData object
-            for col in args.mu_element_id_cols:
-                if col not in mu_data[args.mu_guide_mod].var_keys():
-                    raise ValueError(f"MuData object does not contain the specified element ID column '{col}'. Available columns: {mu_data[args.mu_guide_mod].var_names}")
-        except Exception as e:
-            raise ValueError(f"Error reading MuData object: {e}") from e
+        if args.command != 'simulate':
+            if not hasattr(args, 'mudata'):
+                raise ValueError("Please provide a valid MuData object file path with --mudata")
+            try:
+                mu_data = mu.read_h5mu(args.mudata)
+                # Check that the Mudata object contains results, layer and guide metadata
+                if args.mu_uns_key_results not in mu_data.uns_keys():
+                    raise ValueError(f"MuData object does not contain the specified uns key '{args.mu_uns_key_results}'. Available keys: {mu_data.uns_keys()}")
+                if args.mu_guide_mod not in mu_data.mod:
+                    raise ValueError(f"MuData object does not contain the specified guide modality '{args.mu_guide_mod}'. Available modalities: {mu_data.mod}")
+                # Check if the guide ID column exists in the MuData object
+                if args.mu_guide_id_col not in mu_data[args.mu_guide_mod].var_keys():
+                    raise ValueError(f"MuData object does not contain the specified guide ID column '{args.mu_guide_id_col}'. Available columns: {mu_data[args.mu_guide_mod].var_names}")
+                # Check if the element ID columns exist in the MuData object
+                for col in args.mu_element_id_cols:
+                    if col not in mu_data[args.mu_guide_mod].var_keys():
+                        raise ValueError(f"MuData object does not contain the specified element ID column '{col}'. Available columns: {mu_data[args.mu_guide_mod].var_names}")
+            except Exception as e:
+                raise ValueError(f"Error reading MuData object: {e}") from e
     return args
 
 def update_mudata(args, df):
