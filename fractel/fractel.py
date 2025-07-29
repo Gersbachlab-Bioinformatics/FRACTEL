@@ -12,6 +12,8 @@ import mudata as mu
 import numpy as np
 import pandas as pd
 from scipy.stats import beta
+from scipy.interpolate import interp1d
+from scipy.stats import ecdf
 from statsmodels.stats.multitest import fdrcorrection
 
 # Global constants
@@ -31,19 +33,34 @@ def interpolate_pvalues(df, reference_df, pval_col='pvalue',
     Returns:
     - DataFrame with an additional column containing the interpolated p-values.
     """
-    # Sort the reference p-values
-    reference_pvals = np.sort(reference_df[pval_col].values)
+
+    # Convert p-values to numeric and sort
+    p = reference_df[pval_col].astype(float)
 
     # Check if reference_pvals is empty
-    if reference_pvals.size == 0:
+    if p.size == 0:
         raise ValueError("Reference p-values array is empty. Please provide a non-empty reference dataframe.")
 
-    # Interpolate the p-values in `df` based on the reference distribution
-    df[interpolated_col] = np.interp(
-        df[pval_col],
-        reference_pvals,
-        np.linspace(0, 1, len(reference_pvals))
-    )
+    p_s = np.sort(p)
+
+    # Calculate ECDF
+    _ecdf = ecdf(p_s)
+    cdf_p = _ecdf.cdf.evaluate(p_s)
+
+    # Midpoint adjustment of CDF approximation
+    p2 = np.concatenate(([0], cdf_p))
+    p3 = np.diff(p2)
+    p2[1:] = p2[1:] - p3/2
+    p4 = np.concatenate((p2, [1]))
+    p_s_temp = np.concatenate(([0], p_s, [1]))
+
+    # Create interpolation function
+    f_p = interp1d(p_s_temp, p4, bounds_error=False, fill_value=(0,1))
+
+    # Transform p-values
+    p_targeting = df[pval_col].astype(float)
+    df[interpolated_col] = f_p(p_targeting)
+
     return df
 
 def element_test(dhs_df, sim_data, pval_col='pvalue', bnd=None, bnd_min=3,
