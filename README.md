@@ -3,7 +3,7 @@
 [![Docker](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Gersbachlab-Bioinformatics/FRACTEL/actions/workflows/docker-publish.yml)
 ## Overview
 
-FRACTEL is a software designed to find element-level significant discoveies applying a Robust Rank Aggregation (RRA) method to combine individual p-values.
+FRACTEL is a software designed to find element-level significant discoveries applying a Robust Rank Aggregation (RRA) method to combine individual p-values.
 
 ## Installation
 
