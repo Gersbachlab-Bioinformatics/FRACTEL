@@ -1,7 +1,7 @@
 
 [project]
 name = "fractel"
-version = "0.1.0"
+version = "0.1.1"
 description = "FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements"
 readme = "README.md"
 authors = [

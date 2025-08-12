@@ -11,7 +11,7 @@ To set up the project locally, follow these steps:
 
 1. Install the repository from github:
     ```bash
-    pip install git+https://github.com/Gersbachlab-Bioinformatics/FRACTEL
+    pip install --force --no-deps git+https://github.com/Gersbachlab-Bioinformatics/FRACTEL
     ```
 
 ## Usage
@@ -24,14 +24,15 @@ usage: fractel.py [-h] {run,simulate,interpolate} ...
 FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements
 
 positional arguments:
-  {run,simulate,interpolate}
+  {run,simulate,calibrate}
                         Sub-command to execute
     run                 Run FRACTEL test on a given dataframe with p-values of grouped elements
     simulate            Simulate data for FRACTEL analysis
-    interpolate         Interpolate p-values in a data frame based on a reference data frame
+    calibrate           Calibrate p-values in a data frame based on a background distribution. Currently, the calibration is done by adjusting an empirical cumulative
+                        distribution function (ECDF) from the background/reference set and evaluating the observed p-values against it.
 
 options:
-  -h, --help      show this help message and exit
+  -h, --help            show this help message and exit
 ```
 
 ## Contributing
