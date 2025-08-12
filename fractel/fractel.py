@@ -241,7 +241,7 @@ def save_df_to_tsv(df, output_basename, keep_index=False):
     df.to_csv(f'{output_basename}.tsv.gz', sep='\t', index = keep_index, compression='gzip')
     print(f"Results saved to {output_basename}.tsv.gz")
 
-def run_interpolate(args):
+def run_calibration(args):
     """
     Interpolate p-values in a data frame based on a reference data frame and save the result.
     """
@@ -470,20 +470,22 @@ def main():
     simulate_parser.add_argument('--bnd-min', type=int, default = 3,
                                  help='Minimum number of singletons for the simulation, in case using a variable/proportional bound (default: %(default)s)')
 
-    interpolate_parser = subparsers.add_parser(
-        'interpolate',
-        help='Interpolate p-values in a data frame based on a reference data frame'
+    calibrate_parser = subparsers.add_parser(
+        'calibrate',
+        help='''Calibrate p-values in a data frame based on a background distribution. Currently, the calibration 
+        is done by adjusting an empirical cumulative distribution function (ECDF) from the background/reference set 
+        and evaluating the observed p-values against it.'''
     )
-    interpolate_parser.add_argument('--data-frame', required=True, type=str,
-                                    help='File path to the data frame with p-values to interpolate')
-    interpolate_parser.add_argument('--pval-col', default='pvalue', type=str,
+    calibrate_parser.add_argument('--data-frame', required=True, type=str,
+                                    help='File path to the data frame with background p-values (e.g. non-targeting control p-values)')
+    calibrate_parser.add_argument('--pval-col', default='pvalue', type=str,
                                     help='Column name in the data frames with the p-values to interpolate (default: %(default)s)')
-    interpolate_parser.add_argument('--interpolated-col', default='interpolated_pvalue', type=str,
+    calibrate_parser.add_argument('--interpolated-col', default='interpolated_pvalue', type=str,
                                     help='Column name for the interpolated p-values (default: %(default)s)')
-    interpolate_parser.add_argument('--output-basename', required=True, type=str,
+    calibrate_parser.add_argument('--output-basename', required=True, type=str,
                                     help='Base name for the output file to save the results (will be saved as a compressed tsv file)')
     # Group the reference dataframe selection arguments
-    reference_df_select_group = interpolate_parser.add_argument_group('reference dataframe')
+    reference_df_select_group = calibrate_parser.add_argument_group('reference dataframe')
     reference_df_select_group.add_argument('--reference-data-frame', required=True, type=str,
                                            help='File path to the reference data frame with p-values')
     reference_df_select_group.add_argument('--reference-df-select-col', type=str,
@@ -514,8 +516,8 @@ def main():
         case 'simulate':
             sim_dict = run_simulation(args)
             save_simulation_data(sim_dict, args.output_basename)
-        case 'interpolate':
-            df = run_interpolate(args)
+        case 'calibrate':
+            df = run_calibration(args)
             save_df_to_tsv(df, args.output_basename)
 
 
