@@ -60,4 +60,7 @@ tests/test_data/*.tsv.gz
 tests/test_data/test_mudata_output_FRACTEL.h5mu
 !tests/test_data/test.df.txt.gz
 !tests/test_data/test_output.tsv.gz
-
+!tests/test_data/simulated_data.npz
+tests/test_data/*.pdf
+tests/test_data/*.png
+tests/test_data/*.npz

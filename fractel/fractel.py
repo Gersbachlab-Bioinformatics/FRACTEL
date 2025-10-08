@@ -6,6 +6,8 @@ FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements
 
 import argparse
 import gc
+import logging
+from importlib.metadata import version
 from functools import reduce
 
 import mudata as mu
@@ -13,11 +15,16 @@ import numpy as np
 import pandas as pd
 from scipy.stats import beta
 from scipy.interpolate import interp1d
-from scipy.stats import ecdf
+from scipy.stats import ecdf, kstest
 from statsmodels.stats.multitest import fdrcorrection
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # Global constants
 PSEUDOCOUNT = 1e-10
+logging.basicConfig(level=logging.INFO)
+rng = np.random.default_rng(seed=42)
+mu.set_options(pull_on_update=False)
 
 def interpolate_pvalues(df, reference_df, pval_col='pvalue', 
                         interpolated_col='interpolated_pvalue'):
@@ -123,7 +130,8 @@ def save_simulation_data(sim_dict, output_basename):
     Save the simulated dictionary data to a file.
     """
     np.savez(f'{output_basename}', simulations=sim_dict)
-    print(f"Simulated dictionary data saved to {output_basename}.npz under the key 'simulations'.")
+    logging.info("Simulated dictionary data saved to %s.npz under the key 'simulations'.", 
+                 output_basename)
 
 def load_and_filter_df(args):
     """
@@ -136,6 +144,12 @@ def load_and_filter_df(args):
         usecols=args.usecols
     )
 
+    # If a keyword for background values is specified, create a separate dataframe for background
+    df_background = None
+    if args.keyword_for_background_values and len(args.aggregating_cols) > 0:
+        df_background = df[df[args.aggregating_cols[0]] == args.keyword_for_background_values]
+        df = df[df[args.aggregating_cols[0]] != args.keyword_for_background_values]
+
     # Discard rows with NaN values in the aggregating columns
     df = df[~df[args.aggregating_cols[0]].isna()]
 
@@ -146,7 +160,7 @@ def load_and_filter_df(args):
             [df[col].isin(args.discard_values_in_aggr_cols) for col in args.aggregating_cols]
         )
         df = df[~discard_mask]
-    return df
+    return df, df_background
 
 def load_and_filter_mudata(args):
     """
@@ -157,6 +171,7 @@ def load_and_filter_mudata(args):
     
     # Create a DataFrame from the MuData object results
     df = pd.DataFrame(mu_data.uns[args.mu_uns_key_results])
+
     # Create a copy of the guide metadata from the MuData object
     metadata_df = mu_data[args.mu_guide_mod].var.copy()
 
@@ -175,6 +190,12 @@ def load_and_filter_mudata(args):
         how='left'
     )    
 
+    # If a keyword for background values is specified, create a separate dataframe for background
+    df_background = None
+    if args.keyword_for_background_values and len(args.aggregating_cols) > 0:
+        df_background = df[df[args.aggregating_cols[0]] == args.keyword_for_background_values]
+        df = df[df[args.aggregating_cols[0]] != args.keyword_for_background_values]
+
     # If specified, discard rows with certain values in the aggregating columns
     if args.discard_values_in_aggr_cols:
         discard_mask = reduce(
@@ -184,7 +205,7 @@ def load_and_filter_mudata(args):
         df = df[~discard_mask]
 
     # Return the filtered data frame
-    return df
+    return df, df_background
 
 
 def load_and_filter_data(args):
@@ -195,18 +216,63 @@ def load_and_filter_data(args):
         return load_and_filter_df(args)
     return load_and_filter_mudata(args)
 
+def check_sizes_in_sim_data(group_sizes, sim_data):
+    """
+    Check that all group sizes are present in the simulated data dictionary.
+
+    Parameters:
+    - group_sizes: iterable of group sizes to check
+    - sim_data: dictionary with simulated data, keys are group sizes
+
+    Raises:
+    - ValueError if any group size is missing in sim_data
+    """
+    missing_sizes = [size for size in group_sizes if size not in sim_data]
+    if missing_sizes:
+        raise ValueError(
+            f"The following group sizes are missing in the simulated data: {missing_sizes}. "
+            "Please run the simulation for these group sizes."
+        )
+
 def run_fractel_analysis(args):
     """
-    Run the FRACTEL analysis based on the provided arguments.
+    Run the FRACTEL analysis based on the provided arguments. Returns a DataFrame with the results.
     """
-    
+
+    df, df_background = load_and_filter_data(args)
+    if args.keyword_for_background_value and df_background.size >0:
+        uniform_test = check_pvalues_uniform(df_background[args.pval_col])
+        if uniform_test['is_uniform']:
+            logging.info("Background p-values appear to be uniformly distributed (p-value: %.4e; statistic: %.4f). Proceeding with FRACTEL test.",
+                         uniform_test['p_value'], uniform_test['statistic'])
+        else:
+            save_qq_plot(
+                df_background,
+                pvalue_col=args.pval_col,
+                output_basename=f'{args.output_basename}_background_pvalues'
+            )
+            if args.ignore_miscalibration:
+                logging.warning("Background p-values do not appear to be uniformly distributed (p-value: %.4e; statistic: %.4f). \
+                                You have chosen to ignore this miscalibration, but please consider running the `calibrate` command to adjust your p-values (recommended).",
+                                uniform_test['p_value'], uniform_test['statistic']
+                )
+            else:
+                logging.error("Background p-values do not appear to be uniformly distributed (p-value: %.4e; statistic: %.4f). " \
+                "Please consider running the `calibrate` command to adjust your p-values (recommended) if you haven't done so already. " \
+                "Alternatively you can use `--ignore-miscalibration` to skip this error.",
+                uniform_test['p_value'], uniform_test['statistic']
+                )
+                raise ValueError("Background p-values do not appear to be uniformly distributed. Please calibrate your p-values or use --ignore-miscalibration to proceed.")
+
     # Load the simulated data
     sim_data = list(map(lambda x: np.load(x, allow_pickle = True)['simulations'].item(), args.sim_data))
     if len(sim_data) > 1:
         reduce(merge_dicts, sim_data)
     sim_data = sim_data[0]
     
-    df = load_and_filter_data(args)
+    # Pre-flight check that all group sizes are present in the simulated data
+    group_sizes = sorted([int(c) for c in df.groupby(args.aggregating_cols).count().iloc[:, -1].unique()])
+    check_sizes_in_sim_data(group_sizes, sim_data)
 
     # Group the data frame by the specified columns and apply the FRACTEL test
     df_tmp = (
@@ -239,7 +305,105 @@ def save_df_to_tsv(df, output_basename, keep_index=False):
     Save the results data frame to a compressed TSV file.
     """
     df.to_csv(f'{output_basename}.tsv.gz', sep='\t', index = keep_index, compression='gzip')
-    print(f"Results saved to {output_basename}.tsv.gz")
+    logging.info("Results saved to %s.tsv.gz", output_basename)
+
+def check_pvalues_uniform(pvalues, significance_level=0.05):
+    """
+    Test if a distribution of p-values is uniform using a chi-square test.
+
+    Parameters:
+    - pvalues: array-like, p-values to test
+    - significance_level: float, significance level for the test (default: 0.05)
+    - num_bins: int, number of bins for the chi-square test (default: 10)
+
+    Returns:
+    - dict containing:
+        - is_uniform: bool, True if distribution appears uniform
+        - statistic: float, chi-square test statistic
+        - p_value: float, p-value from chi-square test
+    """
+
+    # # Perform chi-square test
+    ks_stat, p_val = kstest(sorted(pvalues), 'uniform')
+
+    return {
+        'is_uniform': p_val > significance_level,
+        'statistic': ks_stat,
+        'p_value': p_val
+    }
+
+def save_qq_plot(df, pvalue_col, output_basename, minus_log10_pval_zero_rep=300, dpi=300):
+    """
+    Create and save a Q-Q plot comparing expected vs observed values using seaborn styling.
+
+    Parameters:
+    - df: DataFrame containing the values to plot
+    - pvalue_col: Column name for expected values
+    - output_basename: Base name for output file
+    - minus_log10_pval_zero_rep: Value to replace -log10(0) (default: 300)
+    - dpi: Resolution for output image (default: 300)
+
+    Returns:
+    - None
+    """
+
+    # Set seaborn style
+    sns.set_style("whitegrid")
+    sns.set_context("paper")
+
+    # Define the number of samples to draw
+    nnt = df.shape[0]
+
+    # Uniform sampling between 0 and 1 (theoretical p-values dist)
+    s = rng.uniform(0, 1, nnt)
+
+    # Extract theoretical quantiles
+    nquantiles = 1e3
+    quantile_array = np.arange(0, 1+1./nquantiles, 1./nquantiles)
+    x = np.quantile(-np.log10(sorted(s)), q=quantile_array)
+
+    # recover observed quantiles for targeting
+    y_targeting = np.quantile(
+        -np.log10(sorted(df[pvalue_col])), # .sample(nnt, random_state=113) 
+        q=quantile_array
+    )
+    y_targeting = np.nan_to_num(
+        y_targeting, 
+        nan=max(int(y_targeting[~np.isnan(y_targeting)].max()*1.05),
+                minus_log10_pval_zero_rep)
+    )
+
+    # Create scatterplot
+    _, ax = plt.subplots(figsize=[8, 8])
+    ax.hist(df[pvalue_col], rasterized=True, bins=200, color='darkgray', alpha=.75)
+    ax.set_ylabel(f'Frequency')
+    ax.set_title('Histogram of p-values', pad=20)
+    sns.despine()
+    plt.tight_layout()
+    plt.savefig(f'{output_basename}_background_pval_hist.pdf', dpi=dpi, bbox_inches='tight')
+    plt.close()
+
+    # Create scatterplot
+    _, ax = plt.subplots(figsize=[8, 8])
+    ax.scatter(x, y_targeting, s=10, color='darkorange', alpha=.75,
+                rasterized=True)
+
+    # Add diagonal line
+    lims = [min(ax.get_xlim()[0], ax.get_ylim()[0]), max(ax.get_xlim()[1], ax.get_ylim()[1])]
+    ax.plot(lims, lims, 'k--', alpha=0.75, linewidth=1)
+    
+    # Labels and title
+    ax.set_xlabel('Expected -log10(uniform p-values)')
+    ax.set_ylabel(f'Observed -log10({pvalue_col})')
+    ax.set_title('Q-Q plot for distribution of expected vs observed p-values', pad=20)
+
+    # Adjust layout
+    sns.despine()
+    plt.tight_layout()
+
+    # Save plot
+    plt.savefig(f'{output_basename}_background_qq_plot.pdf', dpi=dpi, bbox_inches='tight')
+    plt.close()
 
 def run_calibration(args):
     """
@@ -381,7 +545,7 @@ def update_mudata(args, df):
     mudata = mu.read_h5mu(args.mudata)
     mudata.uns[f'{args.output_col_basename}_results'] = df.to_dict(orient='list')
     mudata.write(filename=f'{args.output_basename}_{args.output_col_basename}.h5mu', compression='gzip')
-    print(f"Updated MuData object saved to {args.output_basename}_{args.output_col_basename}.h5mu")
+    logging.info(f"Updated MuData object saved to {args.output_basename}_{args.output_col_basename}.h5mu")
 
 def main():
     """
@@ -390,6 +554,12 @@ def main():
     parser = argparse.ArgumentParser(
         description='FRACTEL: Framework for Rank Aggregation of CRISPR Tests within ELements',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    pkg_version = version("fractel")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {pkg_version}",
     )
 
     subparsers = parser.add_subparsers(dest='command', required=True, help='Sub-command to execute')
@@ -431,6 +601,11 @@ def main():
                              help='If specified, only these columns will be used from the data frame')
     run_parser.add_argument('--discard-values-in-aggr-cols', type=str, nargs="+",
                              help='If specified, these values will be discarded from the data frame in the aggregating columns')
+    run_parser.add_argument('--keyword-for-background-values', type=str,
+                             help='If specified, this value will be used to identify background values in the aggregating columns. ' \
+                             'For example, if aggregating gRNA p-values in genomic elements, this should be the value used to identify non-targeting controls')
+    run_parser.add_argument('--ignore-miscalibration', action='store_true',
+                             help='If specified, ignore miscalibration of background p-values and proceed with the FRACTEL test')
     run_parser.add_argument('--sim-data', required=True, type=str, nargs="+",
                              help='File paths to the numpy dictionary of simulated data to use for the test. ' \
                              'The key should be the number of guides, and the values should be the p-values of the simulations')
@@ -512,7 +687,6 @@ def main():
             save_df_to_tsv(df, args.output_basename, keep_index=True)
             if args.mudata and args.save_updated_mu_data:
                 update_mudata(args, df)
-                
         case 'simulate':
             sim_dict = run_simulation(args)
             save_simulation_data(sim_dict, args.output_basename)
