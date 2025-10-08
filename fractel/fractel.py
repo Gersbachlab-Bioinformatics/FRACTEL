@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 PSEUDOCOUNT = 1e-10
 logging.basicConfig(level=logging.INFO)
 rng = np.random.default_rng(seed=42)
+mu.set_options(pull_on_update=False)
 
 def interpolate_pvalues(df, reference_df, pval_col='pvalue', 
                         interpolated_col='interpolated_pvalue'):
@@ -145,7 +146,7 @@ def load_and_filter_df(args):
 
     # If a keyword for background values is specified, create a separate dataframe for background
     df_background = None
-    if args.keyword_for_background_values:
+    if args.keyword_for_background_values and len(args.aggregating_cols) > 0:
         df_background = df[df[args.aggregating_cols[0]] == args.keyword_for_background_values]
         df = df[df[args.aggregating_cols[0]] != args.keyword_for_background_values]
 
@@ -171,12 +172,6 @@ def load_and_filter_mudata(args):
     # Create a DataFrame from the MuData object results
     df = pd.DataFrame(mu_data.uns[args.mu_uns_key_results])
 
-    # If a keyword for background values is specified, create a separate dataframe for background
-    df_background = None
-    if args.keyword_for_background_values:
-        df_background = df[df[args.aggregating_cols[0]] == args.keyword_for_background_values]
-        df = df[df[args.aggregating_cols[0]] != args.keyword_for_background_values]
-
     # Create a copy of the guide metadata from the MuData object
     metadata_df = mu_data[args.mu_guide_mod].var.copy()
 
@@ -194,6 +189,12 @@ def load_and_filter_mudata(args):
         on=args.mu_guide_id_col,
         how='left'
     )    
+
+    # If a keyword for background values is specified, create a separate dataframe for background
+    df_background = None
+    if args.keyword_for_background_values and len(args.aggregating_cols) > 0:
+        df_background = df[df[args.aggregating_cols[0]] == args.keyword_for_background_values]
+        df = df[df[args.aggregating_cols[0]] != args.keyword_for_background_values]
 
     # If specified, discard rows with certain values in the aggregating columns
     if args.discard_values_in_aggr_cols:
@@ -239,7 +240,7 @@ def run_fractel_analysis(args):
     """
 
     df, df_background = load_and_filter_data(args)
-    if args.keyword_for_background_values:
+    if args.keyword_for_background_value and df_background.size >0:
         uniform_test = check_pvalues_uniform(df_background[args.pval_col])
         if uniform_test['is_uniform']:
             logging.info("Background p-values appear to be uniformly distributed (p-value: %.4e; statistic: %.4f). Proceeding with FRACTEL test.",
