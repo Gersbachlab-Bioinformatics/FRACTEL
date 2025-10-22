@@ -240,7 +240,7 @@ def run_fractel_analysis(args):
     """
 
     df, df_background = load_and_filter_data(args)
-    if args.keyword_for_background_value and df_background.size >0:
+    if args.keyword_for_background_values and df_background.size >0:
         uniform_test = check_pvalues_uniform(df_background[args.pval_col])
         if uniform_test['is_uniform']:
             logging.info("Background p-values appear to be uniformly distributed (p-value: %.4e; statistic: %.4f). Proceeding with FRACTEL test.",
@@ -545,7 +545,8 @@ def update_mudata(args, df):
     mudata = mu.read_h5mu(args.mudata)
     mudata.uns[f'{args.output_col_basename}_results'] = df.to_dict(orient='list')
     mudata.write(filename=f'{args.output_basename}_{args.output_col_basename}.h5mu', compression='gzip')
-    logging.info(f"Updated MuData object saved to {args.output_basename}_{args.output_col_basename}.h5mu")
+    logging.info("Updated MuData object saved to %s_%s.h5mu", args.output_basename, 
+                 args.output_col_basename)
 
 def main():
     """
@@ -676,8 +677,9 @@ def main():
             df = run_fractel_analysis(args)
             if args.effect_size_col is not None:
                 # Add fractel_df to the final results
+                df_tmp, _ = load_and_filter_data(args)
                 df = df.join(compute_effect_sizes(
-                    load_and_filter_data(args),
+                    df_tmp,
                     args.aggregating_cols,
                     args.pval_col,
                     args.effect_size_col,
